@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "trl-misalignment"
+version = "0.1.0"
+description = "Vocab-level misalignment monitoring and token-vocab reward utilities for Hugging Face TRL."
+requires-python = ">=3.10"
+dependencies = [
+  "torch",
+  "transformers",
+  "trl[vllm]",
+  "datasets",
+  "accelerate",
+  "logprob-engine @ git+https://github.com/yunjae-won/logprob-engine.git",
+]
+
+[tool.setuptools.packages.find]
+include = ["trl_misalignment*"]
