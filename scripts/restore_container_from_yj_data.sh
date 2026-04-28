@@ -43,6 +43,7 @@ if [[ -d "${BACKUP_ROOT}/root/trl-misalignment" ]]; then
 else
   git clone git@github.com:yunjae-won/trl-misalignment.git "${REPO_DIR}"
 fi
+find "${REPO_DIR}/scripts" -maxdepth 1 -type f -name "*.sh" -exec chmod +x {} + 2>/dev/null || true
 
 if [[ -d "${BACKUP_ROOT}/root/logprob-engine" ]]; then
   mkdir -p "${LOGPROB_DIR}"
