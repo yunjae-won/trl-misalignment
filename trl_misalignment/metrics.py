@@ -26,24 +26,47 @@ class VocabMisalignmentConfig:
     reward_tol: Optional[float] = None
     ppo_clip_eps: Optional[float] = 0.2
     backprop_j: bool = False
+    j_loss_coef: float = 0.0
     prompt_reduce: str = "sum"
+    debug_tokenization_path: Optional[str] = None
+    debug_tokenization_samples: int = 0
     log_prefix: str = "misalignment"
     log_keys: Sequence[str] = field(
         default_factory=lambda: (
             "J",
+            "J_per_token",
+            "J_over_reverse_kl",
             "reward_a",
             "reward_b",
             "reward_improvement",
+            "reward_a_per_token",
+            "reward_b_per_token",
+            "reward_improvement_per_token",
+            "reward_improvement_over_reverse_kl",
             "reverse_kl_divergence",
             "forward_kl_divergence",
+            "reverse_kl_divergence_per_token",
+            "forward_kl_divergence_per_token",
             "rlhf_score",
             "entropy_a",
             "entropy_b",
             "symmetric_kl",
             "js_divergence",
             "tv_distance",
+            "symmetric_kl_per_token",
+            "js_divergence_per_token",
+            "tv_distance_per_token",
             "gamma_star",
+            "gamma_bracketed_rate",
             "gamma_reward_residual",
+            "reward_vocab_std_per_token",
+            "reward_vocab_abs_max_per_token",
+            "reward_vocab_range_per_token",
+            "policy_reference_top1_agreement_rate",
+            "policy_top_is_reward_top_rate",
+            "reference_top_is_reward_top_rate",
+            "policy_reward_top_prob_per_token",
+            "reference_reward_top_prob_per_token",
         )
     )
 
@@ -135,6 +158,23 @@ def batched_vocablevel_misalignment(
 
     reward_var_a = (p_a * (R_ - reward_a[:, None]).square()).sum(dim=-1)
     reward_var_b = (p_b * (R_ - reward_b[:, None]).square()).sum(dim=-1)
+    reward_vocab_mean = R_.mean(dim=-1)
+    reward_vocab_std = R_.std(dim=-1, unbiased=False)
+    reward_vocab_min = R_.min(dim=-1).values
+    reward_vocab_max = R_.max(dim=-1).values
+    reward_vocab_range = reward_vocab_max - reward_vocab_min
+    reward_vocab_abs_max = R_.abs().max(dim=-1).values
+
+    policy_top_ids = p_a.argmax(dim=-1)
+    reference_top_ids = p_b.argmax(dim=-1)
+    reward_top_ids = R_.argmax(dim=-1)
+    policy_reference_top1_agreement = (policy_top_ids == reference_top_ids).to(work_dtype)
+    policy_top_is_reward_top = (policy_top_ids == reward_top_ids).to(work_dtype)
+    reference_top_is_reward_top = (reference_top_ids == reward_top_ids).to(work_dtype)
+    policy_top_token_reward = R_.gather(1, policy_top_ids[:, None]).squeeze(1)
+    reference_top_token_reward = R_.gather(1, reference_top_ids[:, None]).squeeze(1)
+    reward_top_token_policy_prob = p_a.gather(1, reward_top_ids[:, None]).squeeze(1)
+    reward_top_token_reference_prob = p_b.gather(1, reward_top_ids[:, None]).squeeze(1)
 
     log_ratio = log_a - log_b
     log_ratio_mean_under_a = (p_a * torch.where(p_a > 0, log_ratio, 0)).sum(dim=-1)
@@ -156,6 +196,19 @@ def batched_vocablevel_misalignment(
         "tv_distance": tv_distance,
         "reward_var_a": reward_var_a,
         "reward_var_b": reward_var_b,
+        "reward_vocab_mean": reward_vocab_mean,
+        "reward_vocab_std": reward_vocab_std,
+        "reward_vocab_min": reward_vocab_min,
+        "reward_vocab_max": reward_vocab_max,
+        "reward_vocab_range": reward_vocab_range,
+        "reward_vocab_abs_max": reward_vocab_abs_max,
+        "policy_reference_top1_agreement": policy_reference_top1_agreement,
+        "policy_top_is_reward_top": policy_top_is_reward_top,
+        "reference_top_is_reward_top": reference_top_is_reward_top,
+        "policy_top_token_reward": policy_top_token_reward,
+        "reference_top_token_reward": reference_top_token_reward,
+        "policy_reward_top_prob": reward_top_token_policy_prob,
+        "reference_reward_top_prob": reward_top_token_reference_prob,
         "log_ratio_mean_under_a": log_ratio_mean_under_a,
         "log_ratio_mean_under_b": log_ratio_mean_under_b,
     }
@@ -368,6 +421,50 @@ def completion_vocab_misalignment(
         elif config.prompt_reduce != "sum":
             raise ValueError(f"Unsupported prompt_reduce={config.prompt_reduce!r}; use 'sum' or 'mean'.")
         prompt_metrics[key] = reduced
+
+    lengths_f = lengths.to(next(iter(prompt_metrics.values())).dtype).clamp_min(1)
+    mean_suffix_keys = (
+        "J",
+        "reward_a",
+        "reward_b",
+        "reward_improvement",
+        "reverse_kl_divergence",
+        "forward_kl_divergence",
+        "symmetric_kl",
+        "js_divergence",
+        "tv_distance",
+        "reward_vocab_mean",
+        "reward_vocab_std",
+        "reward_vocab_range",
+        "reward_vocab_abs_max",
+        "policy_reward_top_prob",
+        "reference_reward_top_prob",
+    )
+    for key in mean_suffix_keys:
+        value = prompt_metrics.get(key)
+        if value is None:
+            continue
+        prompt_metrics[f"{key}_per_token"] = value if config.prompt_reduce == "mean" else value / lengths_f
+
+    rate_keys = (
+        "gamma_bracketed",
+        "policy_reference_top1_agreement",
+        "policy_top_is_reward_top",
+        "reference_top_is_reward_top",
+    )
+    for key in rate_keys:
+        value = prompt_metrics.get(key)
+        if value is None:
+            continue
+        prompt_metrics[f"{key}_rate"] = value if config.prompt_reduce == "mean" else value / lengths_f
+
+    eps = torch.finfo(lengths_f.dtype).eps
+    if "J" in prompt_metrics and "reverse_kl_divergence" in prompt_metrics:
+        denom = prompt_metrics["reverse_kl_divergence"].abs().clamp_min(eps)
+        prompt_metrics["J_over_reverse_kl"] = prompt_metrics["J"] / denom
+    if "reward_improvement" in prompt_metrics and "reverse_kl_divergence" in prompt_metrics:
+        denom = prompt_metrics["reverse_kl_divergence"].abs().clamp_min(eps)
+        prompt_metrics["reward_improvement_over_reverse_kl"] = prompt_metrics["reward_improvement"] / denom
 
     return {"token": token_metrics, "prompt": prompt_metrics, "lengths": lengths}
 

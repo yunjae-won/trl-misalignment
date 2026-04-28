@@ -13,7 +13,8 @@ dependencies = [
   "trl[vllm]",
   "datasets",
   "accelerate",
-  "logprob-engine @ git+https://github.com/yunjae-won/logprob-engine.git",
+  "wandb",
+  "logprob-engine @ git+https://github.com/yunjae-won/logprob-engine.git@main",
 ]
 
 [tool.setuptools.packages.find]

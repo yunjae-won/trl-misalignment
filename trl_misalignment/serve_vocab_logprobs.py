@@ -4,8 +4,11 @@ import argparse
 
 import uvicorn
 
+from .compat import apply_runtime_compatibility_patches
+
 
 def main() -> None:
+    apply_runtime_compatibility_patches()
     parser = argparse.ArgumentParser(description="Serve vocab-level logprobs with logprob-engine.")
     parser.add_argument("--model", required=True)
     parser.add_argument("--host", default="127.0.0.1")
