@@ -493,6 +493,102 @@ Operational notes:
 - The coefficient run logged `misalignment/J_aux_loss = 0.003 * J`, confirming
   the backpropagated term was active.
 
+### 2026-04-28 Sequence-Level Reward Ambiguity Analysis
+
+Purpose: test whether tokenwise misalignment metrics become unstable or
+semantically ambiguous when the winner and loser vocab reward models produce
+similar distributions. The concern is that
+`softmax(log pi_w - log pi_l)` can be high-entropy and nearly uniform, while J
+and `grad J` remain nonzero because the policy moved relative to the reference.
+
+Implementation:
+
+- Added `scripts/analyze_sequence_misalignment.py`, a multi-prompt diagnostic
+  that samples prompts, generates completions with the policy checkpoint,
+  computes policy/reference full-vocab logits, computes vocab reward vectors,
+  and writes tokenwise CSVs plus human-readable plots.
+- Added `tests/test_sequence_misalignment_diagnostics.py` for the exact
+  constant-reward limit: if reward is constant and policy differs from
+  reference, J equals `KL(policy||reference)` and `grad J` is nonzero; if policy
+  and reference also match, both vanish.
+- Added `matplotlib` for persistent plot generation in the analysis scripts.
+
+Command:
+
+```bash
+TRL_EXPERIMENTAL_SILENCE=1 PYTHONUNBUFFERED=1 \
+python scripts/analyze_sequence_misalignment.py \
+  --policy-model /root/trl-misalignment/runs/misalignment_ablation/longseq-200step-paired-v1-seed20260428/grpo_jcoef_0_seed20260428/checkpoint-200 \
+  --reference-model yunjae-won/ubq30i_qwen4b_sft_both \
+  --winner-model yunjae-won/ubq30i_qwen4b_sft_yw \
+  --loser-model yunjae-won/ubq30i_qwen4b_sft_yl \
+  --dataset-name trl-lib/ultrafeedback-prompt \
+  --dataset-split train \
+  --output-dir /yj_data/trl_misalignment/sequence-diagnostic-grpo200-train24-seed20260428 \
+  --seed 20260428 \
+  --num-prompts 24 \
+  --max-prompt-length 2048 \
+  --max-new-tokens 64 \
+  --max-analysis-tokens 64 \
+  --policy-device cuda:0 \
+  --reference-device cuda:1 \
+  --reward-winner-device cuda:2 \
+  --reward-loser-device cuda:3 \
+  --no-reward-compile
+```
+
+Artifacts:
+
+- `/yj_data/trl_misalignment/sequence-diagnostic-grpo200-train24-seed20260428/report.md`
+- `/yj_data/trl_misalignment/sequence-diagnostic-grpo200-train24-seed20260428/token_metrics.csv`
+- `/yj_data/trl_misalignment/sequence-diagnostic-grpo200-train24-seed20260428/sequence_summaries.csv`
+- `/yj_data/trl_misalignment/sequence-diagnostic-grpo200-train24-seed20260428/plots/aggregate_scatter.png`
+- `/yj_data/trl_misalignment/sequence-diagnostic-grpo200-train24-seed20260428/plots/entropy_binned_trends.png`
+- `/yj_data/trl_misalignment/sequence-diagnostic-grpo200-train24-seed20260428/plots/sequence_*.png`
+
+Aggregate result over 24 prompts and 1,536 analyzed tokens:
+
+| metric | mean | median | p90 | max |
+| --- | ---: | ---: | ---: | ---: |
+| J | `1.121e-03` | `1.999e-04` | `2.540e-03` | `1.363e-01` |
+| `grad_J_l2` | `8.688e-03` | `2.455e-03` | `2.457e-02` | `2.077e-01` |
+| `KL(policy||ref)` | `1.723e-03` | `3.673e-04` | `3.986e-03` | `3.022e-01` |
+| `std(R)` | `5.253e-01` | `4.517e-01` | `7.555e-01` | `4.372e+00` |
+| `H(softmax R)/logV` | `9.850e-01` | `9.916e-01` | `9.958e-01` | `9.986e-01` |
+| `KL(softmax R||uniform)` | `1.787e-01` | `1.002e-01` | `3.036e-01` | `5.607e+00` |
+| `|gamma|*std(R)` | `3.472e-02` | `1.865e-02` | `8.489e-02` | `4.619e-01` |
+
+Interpretation:
+
+- The computation is numerically stable in the low-signal limit, but the metric
+  changes meaning. When `R = log pi_w - log pi_l` is constant, the exponential
+  tilt cannot use the reward direction, so J collapses to
+  `KL(policy||reference)`.
+- In the GRPO step-200 scan, strict high-entropy/near-uniform reward rows were
+  rare by the combined threshold `H/logV >= 0.995` and
+  `KL(softmax R||uniform) <= 0.02` (`1/1536` rows). Low-scale rows were common:
+  `982/1536` rows had `std(R) <= 0.5`.
+- The highest-J tokens were not primarily the near-uniform reward cases. They
+  had large policy/reference KL and more non-uniform reward vectors. The top
+  token was EOS with `J=0.136`, `grad_J_l2=0.194`,
+  `KL(policy||ref)=0.302`, `std(R)=1.282`, and
+  `KL(softmax R||uniform)=0.801`.
+- `J` tracked `KL(policy||ref)` much more strongly than reward-vector shape in
+  this checkpoint. Reward shape modulated the severity, while policy/reference
+  drift was the dominant factor.
+- Normalized reward entropy alone is a weak reliability test for a large
+  vocabulary. Use it together with `KL(softmax R||uniform)`, `std(R)`, and
+  `|gamma|*std(R)`.
+
+Practical consequence:
+
+- Paper plots should stratify J and `grad J` by reward-vector reliability.
+- Low-std or near-uniform reward rows should be reported as ambiguous residual
+  policy/reference drift, not as clean reward-exploitation evidence.
+- For auxiliary-loss ablations, add a reliability-weighted variant such as
+  `J * clip(KL(softmax R||uniform) / tau, 0, 1)` or a low-std mask, while
+  retaining the original unweighted J as the primary diagnostic.
+
 ## Artifacts
 
 Each run group writes:
