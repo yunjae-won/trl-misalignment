@@ -57,8 +57,8 @@ fi
 
 cd "${REPO_DIR}"
 
-if [[ "${RESTORE_EXACT_PIP:-0}" == "1" && -f "${BACKUP_ROOT}/manifests/pip-freeze-all.txt" ]]; then
-  "${PYTHON_BIN}" -m pip install -r "${BACKUP_ROOT}/manifests/pip-freeze-all.txt"
+if [[ "${RESTORE_EXACT_PIP:-0}" == "1" && -f "${BACKUP_ROOT}/manifests/requirements-portable.txt" ]]; then
+  "${PYTHON_BIN}" -m pip install -r "${BACKUP_ROOT}/manifests/requirements-portable.txt"
 else
   "${PYTHON_BIN}" -m pip install -e .
   if [[ -d "${LOGPROB_DIR}" ]]; then
