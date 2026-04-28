@@ -15,6 +15,8 @@ The implementation is intentionally self-contained:
   configurable coefficient.
 - `docs/research_process.md` records the active experimental protocol, metrics,
   storage layout, and follow-up ablation rules.
+- `docs/container_restore.md` records the persistent `/yj_data` backup and
+  restart procedure for this container.
 
 ## Full ablation script
 

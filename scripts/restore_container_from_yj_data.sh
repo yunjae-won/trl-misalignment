@@ -49,14 +49,19 @@ if [[ -d "${BACKUP_ROOT}/root/logprob-engine" ]]; then
   rsync -a --info=progress2 "${BACKUP_ROOT}/root/logprob-engine/" "${LOGPROB_DIR}/"
 fi
 
-if [[ -d "${BACKUP_ROOT}/root/.cache/huggingface" ]]; then
-  mkdir -p /root/.cache/huggingface
-  rsync -a --info=progress2 "${BACKUP_ROOT}/root/.cache/huggingface/" /root/.cache/huggingface/
-fi
+if [[ -d "${BACKUP_ROOT}/root/.cache" ]]; then
+  mkdir -p /root/.cache
+  rsync -a --info=progress2 "${BACKUP_ROOT}/root/.cache/" /root/.cache/
+else
+  if [[ -d "${BACKUP_ROOT}/root/.cache/huggingface" ]]; then
+    mkdir -p /root/.cache/huggingface
+    rsync -a --info=progress2 "${BACKUP_ROOT}/root/.cache/huggingface/" /root/.cache/huggingface/
+  fi
 
-if [[ -d "${BACKUP_ROOT}/root/.cache/pip" ]]; then
-  mkdir -p /root/.cache/pip
-  rsync -a --info=progress2 "${BACKUP_ROOT}/root/.cache/pip/" /root/.cache/pip/
+  if [[ -d "${BACKUP_ROOT}/root/.cache/pip" ]]; then
+    mkdir -p /root/.cache/pip
+    rsync -a --info=progress2 "${BACKUP_ROOT}/root/.cache/pip/" /root/.cache/pip/
+  fi
 fi
 
 if [[ -d "${BACKUP_ROOT}/private_root_home" ]]; then
