@@ -25,6 +25,16 @@ PYTHON_BIN="${PYTHON_BIN:-python}"
 
 echo "[restore] backup root: ${BACKUP_ROOT}"
 
+if ! command -v rsync >/dev/null 2>&1; then
+  if command -v apt-get >/dev/null 2>&1; then
+    apt-get update
+    apt-get install -y rsync
+  else
+    echo "rsync is required but was not found, and apt-get is unavailable." >&2
+    exit 1
+  fi
+fi
+
 mkdir -p /root/.cache
 
 if [[ -d "${BACKUP_ROOT}/root/trl-misalignment" ]]; then
